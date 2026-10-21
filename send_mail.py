@@ -13,8 +13,8 @@ SENDER_PASSWORD = 'xuub mlmf wjaw nxed'
 
 SEAT_EXCEL_FILE = 'stage_output_seats.xlsx'
 
-# ngrokで発行された外部公開用URL（※ngrokを再起動するたびに変わるので注意してください）
-WEB_APP_URL = 'https://legged-subsystem-matchless.ngrok-free.dev/'
+# Streamlit Community Cloud の正式URL（https:// で始める・末尾スラッシュなし）
+WEB_APP_URL = 'https://ticket-system2-dye2ztspbtagmtnaneocwv.streamlit.app'
 # =====================================================================
 
 
@@ -49,7 +49,6 @@ def _seat_cell_html(seat_code, seat_to_name, my_seats_set):
     )
 
     if seat_code in my_seats_set:
-        # 自分のグループの席 → 青くハイライト + 名前表示
         name = seat_to_name.get(seat_code, '')
         short_name = (name[:4] + '…') if len(name) > 4 else name
         return (
@@ -58,7 +57,6 @@ def _seat_cell_html(seat_code, seat_to_name, my_seats_set):
             f'<div style="font-size:9px;">{short_name}</div></td>'
         )
     else:
-        # 他の席 or 空き
         return (
             f'<td style="{base_style}background-color:#ffffff;color:#555;">'
             f'<div style="font-size:8px;">{seat_code}</div>'
@@ -71,13 +69,11 @@ def generate_seat_map_html(member_list):
     stage.py のレイアウトをメール互換のテーブルHTMLに変換する。
     自分のグループの座席だけ青くハイライトし、名前も表示する。
     """
-    # 座席コード → 名前 の辞書と、自分の座席セットを作成
     seat_to_name = {m['seat']: m['name'] for m in member_list}
     my_seats_set = set(seat_to_name.keys())
 
     rows_html = []
 
-    # ---- 奥側ラベル ----
     rows_html.append(
         '<tr><td colspan="20" style="text-align:center;background-color:#eee;'
         'padding:6px;font-weight:bold;border:1px dashed #777;font-size:12px;">'
@@ -85,28 +81,23 @@ def generate_seat_map_html(member_list):
     )
     rows_html.append('<tr><td colspan="20" style="height:6px;"></td></tr>')
 
-    # stage.py と同じ並び順（G行が奥・上、A行が手前・下）
     for row_label in ['G', 'F', 'E', 'D', 'C', 'B', 'A']:
         cells = []
 
-        # 行ラベル（左）
         cells.append(
             f'<td style="width:28px;font-weight:bold;text-align:center;font-size:12px;">{row_label}</td>'
         )
 
-        # 座席 1〜18
         for s in range(1, 19):
             seat_code = f'{row_label}-{s}'
             cells.append(_seat_cell_html(seat_code, seat_to_name, my_seats_set))
 
-        # 行ラベル（右）
         cells.append(
             f'<td style="width:28px;font-weight:bold;text-align:center;font-size:12px;">{row_label}</td>'
         )
 
         rows_html.append('<tr>' + ''.join(cells) + '</tr>')
 
-    # ---- ひな壇エリア（A行側・手前） ----
     rows_html.append('<tr><td colspan="20" style="height:8px;"></td></tr>')
     rows_html.append(
         '<tr><td colspan="20" style="text-align:center;background-color:#eee;'
@@ -114,7 +105,6 @@ def generate_seat_map_html(member_list):
         '🪑 ひな壇エリア (A行側・手前)</td></tr>'
     )
 
-    # 凡例
     rows_html.append('<tr><td colspan="20" style="height:12px;"></td></tr>')
     rows_html.append(
         '<tr><td colspan="20" style="font-size:11px;color:#555;text-align:center;">'
@@ -140,7 +130,8 @@ def generate_seat_map_html(member_list):
 # メイン処理
 # =====================================================================
 try:
-    print(f"使用するWEBチケットURL: {WEB_APP_URL}")
+    base_url = WEB_APP_URL.rstrip('/')
+    print(f"使用するWEBチケットURL: {base_url}")
 
     df_seats = pd.read_excel(SEAT_EXCEL_FILE)
     df_seats.columns = df_seats.columns.str.strip()
@@ -155,12 +146,15 @@ try:
 
     for _, row in unique_winners.iterrows():
         name = str(row['代表者名']).strip()
-        to_email = row['代表者メールアドレス']  # テスト時はご自身のメールアドレスに書き換えてください
+
+        to_email = str(row.get('代表者メールアドレス', '')).strip()
+        if not to_email or to_email == 'nan' or '@' not in to_email:
+            to_email = 'yk081323434@gmail.com'  # フォールバック（テスト用）
+
         count = row.get('グループ人数', '複数')
 
         assigned_seats, token_key, member_list = find_all_seats_for_user(name, df_seats)
 
-        # グループメンバーの座席詳細テキストを作成
         member_details_html = ""
         for m in member_list:
             member_details_html += (
@@ -168,18 +162,32 @@ try:
                 f"(座席: <span style='color:#2980b9;'>{m['seat']}</span>)</li>"
             )
 
-        # ★ stage.py と同じレイアウトの座席マップを生成
         seat_map_html = generate_seat_map_html(member_list)
 
-        # メールオブジェクトの作成（HTML形式）
+        ticket_url = f"{base_url}/?token={token_key}"
+
         msg = MIMEMultipart('alternative')
         msg['From'] = SENDER_EMAIL
         msg['To'] = to_email
         msg['Subject'] = '【重要】当選通知および当日の受付・座席番号のお知らせ'
 
-        ticket_url = f"{WEB_APP_URL}?token={token_key}"
+        text_body = f"""{name} 様
 
-        # HTML形式の本文（会場マップを追加）
+この度はご応募いただき誠にありがとうございました。
+厳正なる抽選の結果、ご当選となりましたのでお知らせいたします。
+
+【WEBチケット確認ページ】
+下のURLをタップ（またはクリック）してください。
+{ticket_url}
+
+受付認証キー: {token_key}
+割当座席番号: {assigned_seats}
+お申込人数: {count} 名様
+
+※当日は本人の学生証を持参してください。
+※解禁日時まではQRコードは表示されません。
+"""
+
         html_body = f'''
 <html>
 <body style="font-family: sans-serif; color: #333; line-height: 1.6;">
@@ -230,7 +238,6 @@ try:
   </tr>
 </table>
 
-<!-- ★ 会場座席マップ（stage.py のレイアウトをメール互換テーブルで再現） -->
 <div style="margin: 25px 0; text-align: center;">
   <p style="font-weight: bold; color: #2c3e50; margin-bottom: 8px;">🎬 会場座席レイアウト（あなたの座席は青色）</p>
   <div style="overflow-x: auto; max-width: 100%;">
@@ -238,14 +245,21 @@ try:
   </div>
 </div>
 
-<div style="text-align: center; margin: 25px 0;">
-  <a href="{ticket_url}" style="background-color: #3498db; color: white; padding: 12px 24px; text-decoration: none; font-weight: bold; border-radius: 5px; display: inline-block;">
+<div style="text-align: center; margin: 30px 0;">
+  <a href="{ticket_url}"
+     target="_blank"
+     rel="noopener noreferrer"
+     style="background-color: #3498db; color: #ffffff; padding: 14px 28px; text-decoration: none; font-weight: bold; border-radius: 6px; display: inline-block; font-size: 16px;">
     🎫 WEBチケット確認ページを開く
   </a>
 </div>
-<p style="font-size: 12px; color: #666; word-break: break-all; text-align: center;">
-  うまくボタンから開けない場合は、以下のURLをブラウザに貼り付けてください。<br>
-  {ticket_url}
+
+<p style="font-size: 14px; text-align: center; margin: 16px 0;">
+  ボタンが開けない場合は、下の青いリンクをタップしてください。<br>
+  <a href="{ticket_url}" target="_blank" rel="noopener noreferrer"
+     style="color: #1a73e8; text-decoration: underline; word-break: break-all; font-size: 13px;">
+    {ticket_url}
+  </a>
 </p>
 
 <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
@@ -258,10 +272,13 @@ try:
 </body>
 </html>
 '''
+
+        msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
         msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
         server.send_message(msg)
         print(f"送信完了: {name} 様 ({to_email}) -> 座席: {assigned_seats} [キー: {token_key}]")
+        print(f"  リンク: {ticket_url}")
         time.sleep(1)
 
     server.quit()
