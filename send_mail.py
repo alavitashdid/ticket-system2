@@ -215,7 +215,7 @@ try:
 <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
   <tr>
     <td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9; width: 35%;"><b>公演日時</b></td>
-    <td style="padding: 8px; border: 1px solid #ddd;">2026年8月15日(土) 14:00開演 (受付開始 13:30)</td>
+    <td style="padding: 8px; border: 1px solid #ddd;">2026年11月7日(土) 13:00開演 (受付開始 12:40)</td>
   </tr>
   <tr>
     <td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9;"><b>お申込人数</b></td>
