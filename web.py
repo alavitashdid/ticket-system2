@@ -3,7 +3,13 @@ import pandas as pd
 import qrcode
 import io
 import streamlit.components.v1 as components
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+try:
+    from zoneinfo import ZoneInfo
+    JST = ZoneInfo("Asia/Tokyo")
+except Exception:
+    JST = timezone(timedelta(hours=9))
 
 st.set_page_config(page_title='入場チケット確認ページ', layout='centered')
 
@@ -22,7 +28,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ----------------------------------------------
-# ★ 公開日時（指定時間）の設定
+# ★ 公開日時（指定時間）の設定【日本時間】
 RELEASE_YEAR = 2026
 RELEASE_MONTH = 11
 RELEASE_DAY = 7
@@ -66,7 +72,7 @@ st.markdown(f"### 👤 お申込グループ代表: {rep_name} 様")
 st.markdown("---")
 
 # ---------------------------------------------------------------------------
-# 画面最上部の0.1秒単位のリアルタイム現在時刻時計
+# 画面最上部の0.1秒単位のリアルタイム現在時刻時計（日本時間固定）
 # ---------------------------------------------------------------------------
 top_clock_html = f"""
 <div style="font-family: monospace; font-size: 15px; color: #004085; background-color: #cce5ff; padding: 10px; border-radius: 5px; text-align: center; font-weight: bold; margin-bottom: 15px;" id="live-clock">
@@ -76,14 +82,26 @@ top_clock_html = f"""
 <script>
     function updateTopClock() {{
         const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const day = String(now.getDate()).padStart(2, '0');
-        const hours = String(now.getHours()).padStart(2, '0');
-        const minutes = String(now.getMinutes()).padStart(2, '0');
-        const seconds = String(now.getSeconds()).padStart(2, '0');
+        const parts = new Intl.DateTimeFormat("ja-JP", {{
+            timeZone: "Asia/Tokyo",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hourCycle: "h23"
+        }}).formatToParts(now);
+
+        const part = (type) => parts.find(item => item.type === type).value;
+        const year = part("year");
+        const month = part("month");
+        const day = part("day");
+        const hours = part("hour");
+        const minutes = part("minute");
+        const seconds = part("second");
         const deciseconds = Math.floor(now.getMilliseconds() / 100);
-        
+
         document.getElementById('live-clock').innerText = "🕒 現在時刻: " + year + "年" + month + "月" + day + "日 " + hours + ":" + minutes + ":" + seconds + "." + deciseconds;
     }}
     setInterval(updateTopClock, 100);
@@ -92,9 +110,13 @@ top_clock_html = f"""
 """
 components.html(top_clock_html, height=55)
 
-# Python側の時間判定（初期表示の分岐用）
-now = datetime.now()
-release_dt = datetime(RELEASE_YEAR, RELEASE_MONTH, RELEASE_DAY, RELEASE_HOUR, RELEASE_MINUTE, RELEASE_SECOND)
+# Python側の時間判定（日本時間で比較 → CloudのUTCでも正しく動く）
+now = datetime.now(JST)
+release_dt = datetime(
+    RELEASE_YEAR, RELEASE_MONTH, RELEASE_DAY,
+    RELEASE_HOUR, RELEASE_MINUTE, RELEASE_SECOND,
+    tzinfo=JST
+)
 
 if now < release_dt:
     st.warning(f"🔒 指定時間までロックされています。\n\n**解禁日時: {RELEASE_LABEL}**\n\n各チケット上のカウントダウンが0になると自動で解禁されます。")
@@ -108,27 +130,27 @@ for idx, row in enumerate(user_rows):
     student_id = row['学籍番号']
     seat = row['座席番号']
     token = row['受付キー']
-    
+
     with st.container():
         st.markdown('<div class="ticket-box">', unsafe_allow_html=True)
-        
+
         # 各チケット専用の0.1秒単位タイマーコンポーネント（IDをユニークにする）
         timer_id = f"ticket-timer-{idx}"
-        
+
         ticket_timer_html = f"""
         <div style="font-family: sans-serif; font-size: 13px; text-align: center; padding: 10px; border-radius: 4px; margin-bottom: 12px; font-weight: bold; line-height: 1.6;" id="{timer_id}">
             ⏳ 読み込み中...
         </div>
 
         <script>
-            const releaseTime_{idx} = new Date({RELEASE_YEAR}, {RELEASE_MONTH - 1}, {RELEASE_DAY}, {RELEASE_HOUR}, {RELEASE_MINUTE}, {RELEASE_SECOND}).getTime();
+            const releaseTime_{idx} = Date.parse("{RELEASE_YEAR}-{RELEASE_MONTH:02d}-{RELEASE_DAY:02d}T{RELEASE_HOUR:02d}:{RELEASE_MINUTE:02d}:{RELEASE_SECOND:02d}+09:00");
             const timerEl_{idx} = document.getElementById("{timer_id}");
             const releaseLabel_{idx} = "{RELEASE_YEAR}年{RELEASE_MONTH}月{RELEASE_DAY}日 {RELEASE_HOUR:02d}:{RELEASE_MINUTE:02d}";
-            
+
             function updateTimer_{idx}() {{
                 const now = new Date().getTime();
                 const diff = releaseTime_{idx} - now;
-                
+
                 if (diff <= 0) {{
                     timerEl_{idx}.style.backgroundColor = "#d4edda";
                     timerEl_{idx}.style.color = "#155724";
@@ -142,7 +164,7 @@ for idx, row in enumerate(user_rows):
                     const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
                     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
                     const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-                    
+
                     timerEl_{idx}.style.backgroundColor = "#fff3cd";
                     timerEl_{idx}.style.color = "#856404";
                     timerEl_{idx}.innerHTML =
@@ -155,24 +177,24 @@ for idx, row in enumerate(user_rows):
         </script>
         """
         components.html(ticket_timer_html, height=70)
-        
-        # 時間前はプレースホルダー、時間後はQRコードを表示
-        if datetime.now() < release_dt:
+
+        # 時間前はプレースホルダー、時間後はQRコードを表示（日本時間で判定）
+        if datetime.now(JST) < release_dt:
             st.info(f"📌 {name} 様のQRコードは指定時間（{RELEASE_LABEL}）に表示されます。")
         else:
             col1, col2 = st.columns([1, 2])
-            
+
             with col1:
                 qr = qrcode.QRCode(version=1, box_size=5, border=2)
                 qr.add_data(f"{token}-{seat}-{student_id}")
                 qr.make(fit=True)
                 img = qr.make_image(fill_color="black", back_color="white")
-                
+
                 buf = io.BytesIO()
                 img.save(buf, format="PNG")
                 buf.seek(0)
                 st.image(buf, width=150)
-                
+
             with col2:
                 st.markdown(f"""
                 <h4>入場者情報</h4>
@@ -181,5 +203,5 @@ for idx, row in enumerate(user_rows):
                 ・割当座席: <span style="color: #d9534f; font-size: 18px;"><b>{seat}</b></span><br>
                 ・認証キー: <span style="font-size: 11px; color: #888;">{token}</span>
                 """, unsafe_allow_html=True)
-                
+
         st.markdown('</div>', unsafe_allow_html=True)
