@@ -40,7 +40,7 @@ def find_all_seats_for_user(name, df):
     return ", ".join(seats), token, members
 
 
-def _seat_cell_html(seat_code, seat_to_name, my_seats_set):
+def _seat_cell_html(seat_code, is_disabled, seat_to_name, my_seats_set):
     """1マス分の座席HTMLを返す（メール互換のインラインスタイル）"""
     base_style = (
         "width:36px;height:32px;border:1px solid #333;border-radius:3px;"
@@ -48,7 +48,14 @@ def _seat_cell_html(seat_code, seat_to_name, my_seats_set):
         "padding:1px;line-height:1.1;"
     )
 
-    if seat_code in my_seats_set:
+    if is_disabled:
+        # 1列目・18列目などの使用不可席
+        return (
+            f'<td style="{base_style}background-color:#e0e0e0;color:#aaa;border-style:dashed;">'
+            f'<div style="font-size:8px;">{seat_code}</div>'
+            f'<div style="font-size:9px;">×</div></td>'
+        )
+    elif seat_code in my_seats_set:
         name = seat_to_name.get(seat_code, '')
         short_name = (name[:4] + '…') if len(name) > 4 else name
         return (
@@ -66,8 +73,7 @@ def _seat_cell_html(seat_code, seat_to_name, my_seats_set):
 
 def generate_seat_map_html(member_list):
     """
-    stage.py のレイアウトをメール互換のテーブルHTMLに変換する。
-    自分のグループの座席だけ青くハイライトし、名前も表示する。
+    stage.py のレイアウトに合わせ、E〜G行および1・18列を除外したメール用座席表HTMLを生成する。
     """
     seat_to_name = {m['seat']: m['name'] for m in member_list}
     my_seats_set = set(seat_to_name.keys())
@@ -81,16 +87,19 @@ def generate_seat_map_html(member_list):
     )
     rows_html.append('<tr><td colspan="20" style="height:6px;"></td></tr>')
 
-    for row_label in ['G', 'F', 'E', 'D', 'C', 'B', 'A']:
+    # 【修正】E〜G行を除外し、A〜D行のみを対象にする
+    for row_label in ['D', 'C', 'B', 'A']:
         cells = []
 
         cells.append(
             f'<td style="width:28px;font-weight:bold;text-align:center;font-size:12px;">{row_label}</td>'
         )
 
+        # 【修正】1〜18列目のうち、1列目と18列目は除外（使用不可）とする
         for s in range(1, 19):
             seat_code = f'{row_label}-{s}'
-            cells.append(_seat_cell_html(seat_code, seat_to_name, my_seats_set))
+            is_disabled = (s in [1, 18])
+            cells.append(_seat_cell_html(seat_code, is_disabled, seat_to_name, my_seats_set))
 
         cells.append(
             f'<td style="width:28px;font-weight:bold;text-align:center;font-size:12px;">{row_label}</td>'
@@ -147,9 +156,17 @@ try:
     for _, row in unique_winners.iterrows():
         name = str(row['代表者名']).strip()
 
-        to_email = str(row.get('代表者メールアドレス', '')).strip()
-        if not to_email or to_email == 'nan' or '@' not in to_email:
-            to_email = 'yk081323434@gmail.com'  # フォールバック（テスト用）
+        # --- メールアドレス1とメールアドレス2の両方を安全に収集 ---
+        emails = []
+        for col_name in ['メールアドレス1', 'メールアドレス2']:
+            if col_name in df_seats.columns:
+                addr = str(row.get(col_name, '')).strip()
+                if addr and addr != 'nan' and '@' in addr:
+                    if addr not in emails:
+                        emails.append(addr)
+        
+        if not emails:
+            raise ValueError(f"【エラー】代表者「{name}」様のメールアドレスがどちらも見つかりませんでした。実行できませんでした。")
 
         count = row.get('グループ人数', '複数')
 
@@ -166,13 +183,15 @@ try:
 
         ticket_url = f"{base_url}/?token={token_key}"
 
-        msg = MIMEMultipart('alternative')
-        msg['From'] = SENDER_EMAIL
-        msg['To'] = to_email
-        msg['Subject'] = '【重要】当選通知および当日の受付・座席番号のお知らせ'
+        # 収集したメールアドレスへそれぞれ個別に送信
+        for to_email in emails:
+            msg = MIMEMultipart('alternative')
+            msg['From'] = SENDER_EMAIL
+            msg['To'] = to_email
+            msg['Subject'] = '【重要】当選通知および当日の受付・座席番号のお知らせ'
 
-        # ---- テキスト版 ----
-        text_body = f"""{name} 様
+            # ---- テキスト版 ----
+            text_body = f"""{name} 様
 
 この度はご応募いただき誠にありがとうございました。
 お申し込みいただいた人数分の席をご用意いたしましたのでご案内いたします。
@@ -189,8 +208,8 @@ try:
 ※解禁日時まではQRコードは表示されません。
 """
 
-        # ---- HTML版 ----
-        html_body = f'''
+            # ---- HTML版 ----
+            html_body = f'''
 <html>
 <body style="font-family: sans-serif; color: #333; line-height: 1.6;">
 <p><b>{name} 様</b></p>
@@ -277,16 +296,16 @@ try:
 </html>
 '''
 
-        msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
-        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+            msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+            msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
-        server.send_message(msg)
-        print(f"送信完了: {name} 様 ({to_email}) -> 座席: {assigned_seats} [キー: {token_key}]")
-        print(f"  リンク: {ticket_url}")
-        time.sleep(1)
+            server.send_message(msg)
+            print(f"送信完了: {name} 様 ({to_email}) -> 座席: {assigned_seats} [キー: {token_key}]")
+            print(f"  リンク: {ticket_url}")
+            time.sleep(1)
 
     server.quit()
     print("すべての送信処理が完了しました。")
 
 except Exception as e:
-    print(f"エラーが発生しました: {e}")
+    print(f"\n❌ エラーが発生しました。実行できませんでした: {e}")
